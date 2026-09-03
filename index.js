@@ -1,34 +1,42 @@
 const TelegramBot = require('node-telegram-bot-api');
-const fs = require('fs');
-const path = require('path');
+const axios = require('axios');
 
 const TOKEN = process.env.TOKEN;
 const ADMIN_ID = 7262941693;
+const JSONBIN_KEY = process.env.JSONBIN_KEY; // Bunu indi əlavə edəcəyik
+const BIN_ID = '6a993a4a23a2f6593e5a1743'; // Sənin ID-n
+
 const bot = new TelegramBot(TOKEN, {polling: true});
+let products = [];
 
-const DATA_FILE = path.join(__dirname, 'products.json');
-
-// Məhsulları fayldan oxu
-function loadProducts() {
+// Məhsulları JSONBIN-dən oxu
+async function loadProducts() {
   try {
-    const data = fs.readFileSync(DATA_FILE, 'utf8');
-    return JSON.parse(data);
-  } catch (e) {
-    return [];
+    const res = await axios.get(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
+      headers: { 'X-Master-Key': JSONBIN_KEY }
+    });
+    products = res.data.record || [];
+    console.log('Məhsullar yükləndi:', products.length);
+  } catch(e) {
+    console.log('Xəta:', e.message);
+    products = [];
   }
 }
 
-// Məhsulları fayla yaz
-function saveProducts(products) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(products, null, 2));
+// Məhsulları JSONBIN-ə yaz
+async function saveProducts() {
+  try {
+    await axios.put(`https://api.jsonbin.io/v3/b/${BIN_ID}`, products, {
+      headers: { 'X-Master-Key': JSONBIN_KEY, 'Content-Type': 'application/json' }
+    });
+  } catch(e) {
+    console.log('Yazma xətası:', e.message);
+  }
 }
 
-let products = loadProducts();
-
-// === BU 2 SƏTİR UPTIMEROBOT ÜÇÜNDÜR. SİLMƏ ===
+// === UPTIMEROBOT ÜÇÜN SERVER ===
 const http = require('http');
 http.createServer((req, res) => res.end('OK')).listen(process.env.PORT || 3000);
-// ================================================
 
 
 bot.onText(/\/start/, (msg) => {
@@ -56,22 +64,23 @@ bot.onText(/\/admin/, (msg) => {
   });
 });
 
-bot.on('message', (msg) => {
+bot.on('message', async (msg) => {
   if(msg.from.id != ADMIN_ID) return;
   if(msg.text === 'Məhsul Əlavə Et') {
     bot.sendMessage(msg.chat.id, 'Format: ad|qiymet|tesvir\nNümunə: iPhone 15|2500|128GB Ağ');
-    bot.once('message', (m) => {
+    bot.once('message', async (m) => {
       const [ad, qiymet, tesvir] = m.text.split('|');
       products.push({ad, qiymet, tesvir});
-      saveProducts(products); // Fayla yazır
-      bot.sendMessage(msg.chat.id, '✅ Məhsul əlavə edildi və yadda saxlanıldı!');
+      await saveProducts(); // JSONBIN-ə yazır
+      bot.sendMessage(msg.chat.id, '✅ Məhsul əlavə edildi və buluda yadda saxlanıldı!');
     });
   }
   if(msg.text === 'Məhsulları Sil') {
     products = [];
-    saveProducts(products);
+    await saveProducts();
     bot.sendMessage(msg.chat.id, '🗑️ Bütün məhsullar silindi');
   }
 });
 
+loadProducts(); // Bot başlayanda məhsulları yüklə
 console.log('Bot işləyir. Admin ID:', ADMIN_ID);
